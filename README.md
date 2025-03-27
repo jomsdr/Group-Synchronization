@@ -1,4 +1,4 @@
-# 🏰 **Dungeon Simulation**  
+# 🏰 **LFG Dungeon Queuing**  
 
 This project simulates a dungeon instance management system using multithreading in **C++**. Players are assigned to dungeon instances where they complete runs of random durations. Each instance operates independently using threads.  
 
