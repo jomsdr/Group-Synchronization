@@ -8,6 +8,7 @@
 #include <fstream>
 #include <sstream>
 #include <regex>
+#include <numeric>
 
 using namespace std;
 
@@ -21,7 +22,8 @@ struct DungeonInstance {
 };
 
 bool simulationDone = false;
-mutex coutMutex;
+mutex mainMtx;
+condition_variable mainCv;
 
 void dungeonInstance(DungeonInstance& instance, int minTime, int maxTime) {
 	random_device rd;
@@ -33,26 +35,27 @@ void dungeonInstance(DungeonInstance& instance, int minTime, int maxTime) {
 
 		instance.cv.wait(lock, [&]() { return instance.active || simulationDone; });
 		if (simulationDone && !instance.active) {
-			break; // Exit if simulation is done and instance is not active
+			break;
 		}
 
 		// Simulate dungeon run
 		int duration = distrib(gen);
 		{
-			lock_guard<mutex> printLock(coutMutex);
+			lock_guard<mutex> printLock(mainMtx);
 			cout << "Instance " << instance.id + 1 << " is active. Time: " << duration << "s" << endl;
 		}
 
-		/*this_thread::sleep_for(chrono::seconds(duration));*/
+		this_thread::sleep_for(chrono::seconds(duration));
 		instance.active = false;
 		instance.partiesServed++;
 		instance.totalTimeServed += duration;
 		{
-			lock_guard<mutex> printLock(coutMutex);
+			lock_guard<mutex> printLock(mainMtx);
 			cout << "Instance " << instance.id + 1 << " has finished. Now empty." << endl;
 		}
 
-		instance.cv.notify_one(); // Notify the main thread
+		// Notify main thread that this instance is free
+		mainCv.notify_one();
 	}
 }
 
@@ -155,12 +158,11 @@ bool readConfig(long& n, long& t, long& h, long& d, long& t1, long& t2) {
 	}
 
 	if (t2 > 15) {
-		cerr << "Error: t2 must be less than or equal to 15. Setting t2 = 15" << endl;
+		cerr << "Warning: t2 must be less than or equal to 15. Setting t2 = 15" << endl;
 		t2 = 15;
 	}
 	return true; // Both values were successfully read and validated
 }
-
 
 int main() {
 	long n, t, h, d, t1, t2;
@@ -177,34 +179,32 @@ int main() {
 	}
 
 	while (t >= 1 && h >= 1 && d >= 3) {
-		// Find an empty instance
-		long instanceID = -1;
-		for (int i = 0; i < n; i++) {
-			unique_lock<mutex> lock(instances[i].mtx);
-			if (!instances[i].active) {
-				// Form a party
-				instanceID = i;
-				instances[i].active = true;
-				instances[i].cv.notify_one();
-				break;
+		unique_lock<mutex> mainLock(mainMtx);
+
+		// Wait until at least one instance is available
+		mainCv.wait(mainLock, [&]() {
+			for (int i = 0; i < n; i++) {
+				if (!instances[i].active) {
+					instances[i].active = true;
+					instances[i].cv.notify_one();
+
+					// Decrease the number of available players
+					t -= 1;
+					h -= 1;
+					d -= 3;
+					return true;
+
+				}
 			}
-		}
-
-		if (instanceID == -1) {
-			continue;
-		}
-
-		// Decrease the number of available players
-		t -= 1;
-		h -= 1;
-		d -= 3;
+			return false;
+		});
+		
 	}
 
 	// End the simulation
 	simulationDone = true;
 
 	for (auto& instance : instances) {
-		unique_lock<mutex> lock(instance.mtx);
 		instance.cv.notify_one();
 	}
 
