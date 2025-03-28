@@ -147,7 +147,7 @@ bool readConfig(long& n, long& t, long& h, long& d, long& t1, long& t2) {
 		return false;
 	}
 
-	if (d < 3) {
+	if (d < 1) {
 		cerr << "Error: d must be greater than or equal to 0." << endl;
 		return false;
 	}
